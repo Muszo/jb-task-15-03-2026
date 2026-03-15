@@ -1,0 +1,38 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+      - id: check-yaml
+
+  - repo: local
+    hooks:
+      - id: java-compile
+        name: Java compile
+        entry: ./gradlew compileJava compileTestJava -q
+        language: system
+        pass_filenames: false
+        files: '\.java$'
+
+      - id: java-tests
+        name: Java tests
+        entry: ./gradlew test -q
+        language: system
+        pass_filenames: false
+        files: '\.java$'
+
+      - id: no-system-exit
+        name: No System.exit() in source
+        entry: 'System\.exit'
+        language: pygrep
+        files: 'src/main/.*\.java$'
+
+      - id: no-print-stacktrace
+        name: No .printStackTrace() in source
+        entry: '\.printStackTrace\(\)'
+        language: pygrep
+        files: 'src/main/.*\.java$'
