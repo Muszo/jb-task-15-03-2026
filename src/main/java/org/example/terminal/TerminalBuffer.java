@@ -394,6 +394,98 @@ public class TerminalBuffer {
     }
 
     /**
+     * Erases part of the current line.
+     *
+     * @param mode 0 = cursor to end of line, 1 = start of line to cursor, 2 = entire line
+     * @throws IllegalArgumentException if mode is not 0, 1, or 2
+     */
+    public void eraseInLine(int mode) {
+        TerminalLine line = screen[cursorRow];
+        switch (mode) {
+            case 0: // cursor to end
+                for (int col = cursorColumn; col < width; col++) {
+                    line.getCell(col).clear(currentAttributes);
+                }
+                break;
+            case 1: // start to cursor
+                for (int col = 0; col <= cursorColumn && col < width; col++) {
+                    line.getCell(col).clear(currentAttributes);
+                }
+                break;
+            case 2: // entire line
+                line.clear(currentAttributes);
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown eraseInLine mode: " + mode);
+        }
+    }
+
+    /**
+     * Erases part of the screen.
+     * <p>
+     * Unlike {@link #clearScreen()}, modes 0-2 do <b>not</b> reset the cursor position,
+     * which matches VT100 specification behavior.
+     *
+     * @param mode 0 = cursor to end of screen, 1 = start to cursor, 2 = entire screen, 3 = screen + scrollback
+     * @throws IllegalArgumentException if mode is not 0, 1, 2, or 3
+     */
+    public void eraseInDisplay(int mode) {
+        switch (mode) {
+            case 0: // cursor to end of screen
+                for (int col = cursorColumn; col < width; col++) {
+                    screen[cursorRow].getCell(col).clear(currentAttributes);
+                }
+                for (int row = cursorRow + 1; row < height; row++) {
+                    screen[row].clear(currentAttributes);
+                }
+                break;
+            case 1: // start of screen to cursor
+                for (int row = 0; row < cursorRow; row++) {
+                    screen[row].clear(currentAttributes);
+                }
+                for (int col = 0; col <= cursorColumn && col < width; col++) {
+                    screen[cursorRow].getCell(col).clear(currentAttributes);
+                }
+                break;
+            case 2: // entire screen (cursor stays)
+                for (int row = 0; row < height; row++) {
+                    screen[row].clear(currentAttributes);
+                }
+                break;
+            case 3: // screen + scrollback (cursor stays, matching xterm behavior)
+                for (int row = 0; row < height; row++) {
+                    screen[row].clear(currentAttributes);
+                }
+                scrollback.clear();
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown eraseInDisplay mode: " + mode);
+        }
+    }
+
+    /**
+     * Deletes N characters at the cursor position, shifting remaining content left.
+     */
+    public void deleteChars(int n) {
+        TerminalLine line = screen[cursorRow];
+        for (int col = cursorColumn; col < width; col++) {
+            int srcCol = col + n;
+            if (srcCol < width) {
+                line.getCell(col).copyFrom(line.getCell(srcCol));
+            } else {
+                line.getCell(col).clear(currentAttributes);
+            }
+        }
+    }
+
+    /**
+     * Inserts N blank characters at the cursor position, shifting content right.
+     */
+    public void insertBlanks(int n) {
+        screen[cursorRow].shiftCellsRight(cursorColumn, n);
+    }
+
+    /**
      * Advances cursor to the next row, scrolling the screen if at the bottom.
      */
     private void advanceCursorToNextRow() {
