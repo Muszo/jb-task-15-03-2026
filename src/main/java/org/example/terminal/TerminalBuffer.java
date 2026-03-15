@@ -38,6 +38,14 @@ public class TerminalBuffer {
     private CellAttributes currentAttributes;
 
     /**
+     * When the cursor reaches the rightmost column after a write, the terminal
+     * enters a "pending wrap" state: the cursor stays at the last column, and
+     * the wrap/scroll happens only when the next printable character arrives.
+     * This matches real VT100/xterm behavior.
+     */
+    private boolean pendingWrap;
+
+    /**
      * Creates a new terminal buffer.
      *
      * @param width             number of columns (must be &gt; 0)
@@ -60,6 +68,7 @@ public class TerminalBuffer {
         this.cursorColumn = 0;
         this.cursorRow = 0;
         this.currentAttributes = CellAttributes.DEFAULT;
+        this.pendingWrap = false;
     }
 
 
@@ -116,6 +125,7 @@ public class TerminalBuffer {
     public void setCursorPosition(int column, int row) {
         this.cursorColumn = clampColumn(column);
         this.cursorRow = clampRow(row);
+        this.pendingWrap = false;
     }
 
     /**
@@ -123,6 +133,7 @@ public class TerminalBuffer {
      */
     public void moveCursorUp(int n) {
         cursorRow = clampRow(cursorRow - n);
+        pendingWrap = false;
     }
 
     /**
@@ -130,6 +141,7 @@ public class TerminalBuffer {
      */
     public void moveCursorDown(int n) {
         cursorRow = clampRow(cursorRow + n);
+        pendingWrap = false;
     }
 
     /**
@@ -137,6 +149,7 @@ public class TerminalBuffer {
      */
     public void moveCursorLeft(int n) {
         cursorColumn = clampColumn(cursorColumn - n);
+        pendingWrap = false;
     }
 
     /**
@@ -144,6 +157,7 @@ public class TerminalBuffer {
      */
     public void moveCursorRight(int n) {
         cursorColumn = clampColumn(cursorColumn + n);
+        pendingWrap = false;
     }
 
 
@@ -156,6 +170,7 @@ public class TerminalBuffer {
      */
     public void writeText(String text) {
         if (text == null || text.isEmpty()) return;
+        pendingWrap = false;
         TerminalLine line = screen[cursorRow];
         for (int i = 0; i < text.length(); i++) {
             if (cursorColumn >= width) break;
@@ -174,6 +189,7 @@ public class TerminalBuffer {
      */
     public void insertText(String text) {
         if (text == null || text.isEmpty()) return;
+        pendingWrap = false;
         TerminalLine line = screen[cursorRow];
         int insertLen = Math.min(text.length(), width - cursorColumn);
         line.shiftCellsRight(cursorColumn, insertLen);
@@ -228,6 +244,7 @@ public class TerminalBuffer {
         }
         cursorColumn = 0;
         cursorRow = 0;
+        pendingWrap = false;
     }
 
     /**
@@ -313,6 +330,79 @@ public class TerminalBuffer {
             sb.append(screen[i].getTextTrimmed());
         }
         return sb.toString();
+    }
+
+
+    /**
+     * Writes a single character at the cursor position with the current attributes,
+     * advancing the cursor. If the cursor is in the "pending wrap" state (at the
+     * rightmost column after a previous write), it wraps to the next line first,
+     * scrolling if necessary. This matches real VT100/xterm behavior.
+     */
+    public void writeChar(char ch) {
+        if (pendingWrap) {
+            // Mark the current line as soft-wrapped (content continues on next line)
+            screen[cursorRow].setWrapped(true);
+            // Perform the deferred wrap
+            cursorColumn = 0;
+            advanceCursorToNextRow();
+            pendingWrap = false;
+        }
+        screen[cursorRow].setCell(cursorColumn, ch, currentAttributes);
+        if (cursorColumn < width - 1) {
+            cursorColumn++;
+        } else {
+            // At the rightmost column — enter pending wrap state
+            pendingWrap = true;
+        }
+    }
+
+    /**
+     * Handles a newline: moves cursor down one row. If already at the bottom,
+     * scrolls the screen up (top line goes to scrollback).
+     */
+    public void newLine() {
+        advanceCursorToNextRow();
+        pendingWrap = false;
+    }
+
+    /**
+     * Handles a carriage return: moves cursor to column 0 on the current row.
+     */
+    public void carriageReturn() {
+        cursorColumn = 0;
+        pendingWrap = false;
+    }
+
+    /**
+     * Handles a backspace: moves cursor left by 1 (does not erase).
+     */
+    public void backspace() {
+        if (cursorColumn > 0) cursorColumn--;
+        pendingWrap = false;
+    }
+
+    private static final int TAB_WIDTH = 8;
+
+    /**
+     * Handles a horizontal tab: advances cursor to the next tab stop (every {@value TAB_WIDTH} columns).
+     */
+    public void tab() {
+        int nextTab = ((cursorColumn / TAB_WIDTH) + 1) * TAB_WIDTH;
+        cursorColumn = Math.min(nextTab, width - 1);
+        pendingWrap = false;
+    }
+
+    /**
+     * Advances cursor to the next row, scrolling the screen if at the bottom.
+     */
+    private void advanceCursorToNextRow() {
+        if (cursorRow < height - 1) {
+            cursorRow++;
+        } else {
+            // At bottom — scroll up
+            insertNewLineAtBottom();
+        }
     }
 
 
