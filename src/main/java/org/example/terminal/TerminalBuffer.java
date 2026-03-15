@@ -2,7 +2,6 @@ package org.example.terminal;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -44,7 +43,6 @@ public class TerminalBuffer {
      * This matches real VT100/xterm behavior.
      */
     private boolean pendingWrap;
-
     /**
      * Creates a new terminal buffer.
      *
@@ -93,7 +91,7 @@ public class TerminalBuffer {
      * Sets the current attributes used for subsequent writes.
      */
     public void setCurrentAttributes(CellAttributes attributes) {
-        this.currentAttributes = Objects.requireNonNull(attributes, "attributes must not be null");
+        this.currentAttributes = java.util.Objects.requireNonNull(attributes, "attributes must not be null");
     }
 
     /**
@@ -164,9 +162,12 @@ public class TerminalBuffer {
     /**
      * Writes text at the current cursor position, overwriting existing content.
      * The cursor advances to the right. Characters beyond the screen width are discarded.
-     * The cursor is clamped to the last column (width-1).
+     * The cursor is clamped to the last column (width-1). Unlike {@link #writeChar(char)},
+     * this method does <b>not</b> wrap text to the next line — it is intended for direct
+     * buffer manipulation, not for processing terminal output streams.
      *
      * @param text the text to write (control characters are written literally, not interpreted)
+     * @see #writeChar(char) for the wrap-aware variant used by the ANSI parser
      */
     public void writeText(String text) {
         if (text == null || text.isEmpty()) return;
@@ -182,7 +183,8 @@ public class TerminalBuffer {
 
     /**
      * Inserts text at the current cursor position, shifting existing content to the right.
-     * Content pushed beyond the line width is discarded.
+     * Content pushed beyond the line width is discarded (no wrapping variant) or
+     * wraps to the next line (wrapping variant).
      * The cursor advances past the inserted text.
      *
      * @param text the text to insert
@@ -192,7 +194,9 @@ public class TerminalBuffer {
         pendingWrap = false;
         TerminalLine line = screen[cursorRow];
         int insertLen = Math.min(text.length(), width - cursorColumn);
+        // Shift existing content to the right to make room
         line.shiftCellsRight(cursorColumn, insertLen);
+        // Write the inserted characters into the gap
         for (int i = 0; i < insertLen; i++) {
             line.setCell(cursorColumn, text.charAt(i), currentAttributes);
             cursorColumn++;
@@ -204,7 +208,7 @@ public class TerminalBuffer {
      * Fills the current cursor row with the given character using the current attributes.
      * The cursor position is not changed.
      *
-     * @param ch the fill character
+     * @param ch the fill character (use '\0' or ' ' for clearing)
      */
     public void fillLine(char ch) {
         screen[cursorRow].fill(ch, currentAttributes);
@@ -216,10 +220,13 @@ public class TerminalBuffer {
      * All other lines shift up by one.
      */
     public void insertNewLineAtBottom() {
+        // Push the top screen line into scrollback
         pushToScrollback(screen[0]);
+        // Shift all lines up by one
         for (int i = 0; i < height - 1; i++) {
             screen[i] = screen[i + 1];
         }
+        // Create a new empty line at the bottom
         screen[height - 1] = new TerminalLine(width);
     }
 
@@ -228,9 +235,11 @@ public class TerminalBuffer {
      * All lines shift down by one; the bottom line is discarded.
      */
     public void insertNewLineAtTop() {
+        // Shift all lines down by one (bottom line is lost)
         for (int i = height - 1; i > 0; i--) {
             screen[i] = screen[i - 1];
         }
+        // Create a new empty line at the top
         screen[0] = new TerminalLine(width);
     }
 
@@ -258,6 +267,10 @@ public class TerminalBuffer {
 
     /**
      * Gets the character at the given screen position.
+     *
+     * @param column 0-based column
+     * @param row    0-based screen row
+     * @return the character at that position
      */
     public char getCharAt(int column, int row) {
         validateScreenPosition(column, row);
@@ -266,6 +279,10 @@ public class TerminalBuffer {
 
     /**
      * Gets the attributes at the given screen position.
+     *
+     * @param column 0-based column
+     * @param row    0-based screen row
+     * @return the attributes at that position
      */
     public CellAttributes getAttributesAt(int column, int row) {
         validateScreenPosition(column, row);
@@ -274,6 +291,9 @@ public class TerminalBuffer {
 
     /**
      * Returns a single screen line as a trimmed string.
+     *
+     * @param row 0-based screen row
+     * @return the line text (trailing spaces trimmed)
      */
     public String getScreenLine(int row) {
         validateScreenRow(row);
@@ -282,6 +302,7 @@ public class TerminalBuffer {
 
     /**
      * Returns the entire screen content as a multi-line string.
+     * Each line is trimmed and separated by '\n'.
      */
     public String getScreenContent() {
         StringBuilder sb = new StringBuilder();
@@ -294,6 +315,10 @@ public class TerminalBuffer {
 
     /**
      * Gets the character at the given scrollback position.
+     *
+     * @param column 0-based column
+     * @param row    0-based scrollback row (0 = oldest line)
+     * @return the character at that position
      */
     public char getScrollbackCharAt(int column, int row) {
         validateScrollbackPosition(column, row);
@@ -302,6 +327,10 @@ public class TerminalBuffer {
 
     /**
      * Gets the attributes at the given scrollback position.
+     *
+     * @param column 0-based column
+     * @param row    0-based scrollback row (0 = oldest line)
+     * @return the attributes at that position
      */
     public CellAttributes getScrollbackAttributesAt(int column, int row) {
         validateScrollbackPosition(column, row);
@@ -310,6 +339,9 @@ public class TerminalBuffer {
 
     /**
      * Returns a single scrollback line as a trimmed string.
+     *
+     * @param row 0-based scrollback row (0 = oldest)
+     * @return the line text
      */
     public String getScrollbackLine(int row) {
         if (row < 0 || row >= scrollback.size()) throw new IndexOutOfBoundsException("Scrollback row " + row + " out of bounds");
@@ -331,7 +363,6 @@ public class TerminalBuffer {
         }
         return sb.toString();
     }
-
 
     /**
      * Writes a single character at the cursor position with the current attributes,
@@ -423,7 +454,7 @@ public class TerminalBuffer {
     /**
      * Erases part of the screen.
      * <p>
-     * Unlike {@link #clearScreen()}, modes 0-2 do <b>not</b> reset the cursor position,
+     * Unlike {@link #clearScreen()}, modes 0–2 do <b>not</b> reset the cursor position,
      * which matches VT100 specification behavior.
      *
      * @param mode 0 = cursor to end of screen, 1 = start to cursor, 2 = entire screen, 3 = screen + scrollback
@@ -432,17 +463,21 @@ public class TerminalBuffer {
     public void eraseInDisplay(int mode) {
         switch (mode) {
             case 0: // cursor to end of screen
+                // Clear rest of current line
                 for (int col = cursorColumn; col < width; col++) {
                     screen[cursorRow].getCell(col).clear(currentAttributes);
                 }
+                // Clear all lines below
                 for (int row = cursorRow + 1; row < height; row++) {
                     screen[row].clear(currentAttributes);
                 }
                 break;
             case 1: // start of screen to cursor
+                // Clear all lines above
                 for (int row = 0; row < cursorRow; row++) {
                     screen[row].clear(currentAttributes);
                 }
+                // Clear current line up to and including cursor
                 for (int col = 0; col <= cursorColumn && col < width; col++) {
                     screen[cursorRow].getCell(col).clear(currentAttributes);
                 }
@@ -497,6 +532,227 @@ public class TerminalBuffer {
         }
     }
 
+
+    /**
+     * Resizes the terminal to new dimensions, reflowing soft-wrapped content.
+     * <p>
+     * When the width changes, soft-wrapped lines (marked by {@link TerminalLine#isWrapped()})
+     * are merged back into logical lines and re-wrapped at the new width. Hard line breaks
+     * (explicit newlines) are always preserved.
+     * <p>
+     * When only the height changes, no reflow is needed — lines are moved between
+     * scrollback and screen as appropriate.
+     * <p>
+     * The cursor position is tracked through the transformation and remains on screen.
+     *
+     * @param newWidth  new number of columns (must be &gt; 0)
+     * @param newHeight new number of visible screen rows (must be &gt; 0)
+     */
+    public void resize(int newWidth, int newHeight) {
+        if (newWidth <= 0) throw new IllegalArgumentException("Width must be positive: " + newWidth);
+        if (newHeight <= 0) throw new IllegalArgumentException("Height must be positive: " + newHeight);
+        if (newWidth == this.width && newHeight == this.height) return;
+
+        boolean widthChanged = (newWidth != this.width);
+
+        // Collect all physical lines: scrollback then screen
+        List<TerminalLine> allLines = new ArrayList<>(scrollback.size() + height);
+        allLines.addAll(scrollback);
+        for (TerminalLine line : screen) {
+            allLines.add(line);
+        }
+
+        // Cursor's absolute row in allLines
+        int cursorAbsRow = scrollback.size() + cursorRow;
+
+        List<TerminalLine> result;
+        int newCursorAbsRow;
+        int newCursorCol;
+
+        if (widthChanged) {
+            result = reflowLines(allLines, newWidth, cursorAbsRow, cursorColumn);
+            // Cursor position is returned via the last two elements of the reflowResult helper
+            // Using a simpler approach: recompute cursor during reflow
+            int[] cursorResult = reflowCursor(allLines, newWidth, cursorAbsRow, cursorColumn);
+            newCursorAbsRow = cursorResult[0];
+            newCursorCol = cursorResult[1];
+        } else {
+            // Width unchanged — height-only change, no reflow needed
+            result = allLines;
+            newCursorAbsRow = cursorAbsRow;
+            newCursorCol = cursorColumn;
+        }
+
+        // Ensure at least newHeight lines
+        while (result.size() < newHeight) {
+            result.add(new TerminalLine(newWidth));
+        }
+
+        int total = result.size();
+
+        // Anchor screen so the cursor stays visible and at a reasonable position.
+        // Try to keep the cursor at the same relative screen row; if that's not
+        // possible, place it at the bottom of the screen.
+        int desiredCursorScreenRow = Math.min(newCursorAbsRow, newHeight - 1);
+        int screenStart = newCursorAbsRow - desiredCursorScreenRow;
+        screenStart = Math.max(0, Math.min(screenStart, total - newHeight));
+
+        // Rebuild scrollback
+        scrollback.clear();
+        for (int j = 0; j < screenStart; j++) {
+            scrollback.add(result.get(j));
+        }
+        // Trim scrollback to max size
+        int excess = scrollback.size() - maxScrollbackSize;
+        if (excess > 0) {
+            scrollback.subList(0, excess).clear();
+        }
+
+        // Rebuild screen
+        this.screen = new TerminalLine[newHeight];
+        for (int j = 0; j < newHeight; j++) {
+            this.screen[j] = result.get(screenStart + j);
+        }
+
+        // Update dimensions and cursor
+        this.width = newWidth;
+        this.height = newHeight;
+
+        int screenRow = newCursorAbsRow - screenStart;
+        this.cursorRow = Math.max(0, Math.min(screenRow, newHeight - 1));
+        this.cursorColumn = Math.max(0, Math.min(newCursorCol, newWidth - 1));
+        this.pendingWrap = false;
+    }
+
+    /**
+     * Reflows all lines at the given new width. Soft-wrapped lines are merged into
+     * logical lines and re-wrapped. Hard breaks are preserved.
+     */
+    private List<TerminalLine> reflowLines(List<TerminalLine> allLines, int newWidth,
+                                           int cursorAbsRow, int cursorCol) {
+        List<TerminalLine> result = new ArrayList<>();
+        int i = 0;
+
+        while (i < allLines.size()) {
+            // Find the extent of this logical line (consecutive soft-wrapped lines)
+            int logicalStart = i;
+            while (i < allLines.size() - 1 && allLines.get(i).isWrapped()) {
+                i++;
+            }
+            int logicalEnd = i; // inclusive
+            i++;
+
+            // Flatten cells of this logical line into arrays
+            int totalCells = 0;
+            for (int j = logicalStart; j <= logicalEnd; j++) {
+                TerminalLine line = allLines.get(j);
+                totalCells += (j < logicalEnd) ? line.getWidth() : effectiveLength(line);
+            }
+
+            char[] chars = new char[totalCells];
+            CellAttributes[] attrs = new CellAttributes[totalCells];
+            int idx = 0;
+            for (int j = logicalStart; j <= logicalEnd; j++) {
+                TerminalLine line = allLines.get(j);
+                int usable = (j < logicalEnd) ? line.getWidth() : effectiveLength(line);
+                for (int col = 0; col < usable; col++) {
+                    Cell cell = line.getCell(col);
+                    chars[idx] = cell.getCharacter();
+                    attrs[idx] = cell.getAttributes();
+                    idx++;
+                }
+            }
+
+            // Re-wrap at newWidth
+            if (totalCells == 0) {
+                result.add(new TerminalLine(newWidth));
+            } else {
+                for (int offset = 0; offset < totalCells; offset += newWidth) {
+                    TerminalLine newLine = new TerminalLine(newWidth);
+                    int end = Math.min(offset + newWidth, totalCells);
+                    for (int j = offset; j < end; j++) {
+                        newLine.setCell(j - offset, chars[j], attrs[j]);
+                    }
+                    boolean isLastChunk = (end >= totalCells);
+                    newLine.setWrapped(!isLastChunk);
+                    result.add(newLine);
+                }
+            }
+        }
+
+        if (result.isEmpty()) {
+            result.add(new TerminalLine(newWidth));
+        }
+        return result;
+    }
+
+    /**
+     * Computes the new cursor position after reflowing lines at a new width.
+     * Returns {newAbsoluteRow, newColumn}.
+     */
+    private int[] reflowCursor(List<TerminalLine> allLines, int newWidth,
+                               int cursorAbsRow, int cursorCol) {
+        int newAbsRow = 0;
+        int newCol = 0;
+        int resultRowCount = 0;
+        int i = 0;
+
+        while (i < allLines.size()) {
+            int logicalStart = i;
+            while (i < allLines.size() - 1 && allLines.get(i).isWrapped()) {
+                i++;
+            }
+            int logicalEnd = i;
+            i++;
+
+            // Total cells in this logical line
+            int totalCells = 0;
+            for (int j = logicalStart; j <= logicalEnd; j++) {
+                TerminalLine line = allLines.get(j);
+                totalCells += (j < logicalEnd) ? line.getWidth() : effectiveLength(line);
+            }
+
+            // Check if cursor falls within this logical line
+            if (cursorAbsRow >= logicalStart && cursorAbsRow <= logicalEnd) {
+                // Compute cursor's character offset within the logical line
+                int cursorOffset = 0;
+                for (int j = logicalStart; j < cursorAbsRow; j++) {
+                    cursorOffset += allLines.get(j).getWidth();
+                }
+                cursorOffset += cursorCol;
+
+                // Allow cursor to be at totalCells (one past last character)
+                cursorOffset = Math.max(0, Math.min(cursorOffset, totalCells));
+
+                // Map to new grid coordinates
+                int linesForLogical = (totalCells == 0) ? 1 : (totalCells + newWidth - 1) / newWidth;
+                int targetRow = (totalCells == 0) ? 0 : Math.min(cursorOffset / newWidth, linesForLogical - 1);
+                int targetCol = cursorOffset - targetRow * newWidth;
+                targetCol = Math.min(targetCol, newWidth - 1);
+
+                newAbsRow = resultRowCount + targetRow;
+                newCol = targetCol;
+            }
+
+            // Count how many physical lines this logical line produces at newWidth
+            int linesProduced = (totalCells == 0) ? 1 : (totalCells + newWidth - 1) / newWidth;
+            resultRowCount += linesProduced;
+        }
+
+        return new int[]{newAbsRow, newCol};
+    }
+
+    /**
+     * Returns the effective length of a line (excluding trailing empty cells).
+     * Trailing cells with character {@code '\0'} are not counted.
+     */
+    private static int effectiveLength(TerminalLine line) {
+        int len = line.getWidth();
+        while (len > 0 && line.getCell(len - 1).isEmpty()) {
+            len--;
+        }
+        return len;
+    }
 
     private int clampColumn(int column) {
         return Math.max(0, Math.min(column, width - 1));
