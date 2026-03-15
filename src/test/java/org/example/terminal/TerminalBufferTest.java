@@ -560,4 +560,126 @@ class TerminalBufferTest {
             assertEquals('c', buffer.getScrollbackCharAt(0, 0));
         }
     }
+
+
+    @Nested
+    @DisplayName("Terminal operations")
+    class TerminalOpsTests {
+
+        @Test
+        @DisplayName("writeChar writes at cursor and advances")
+        void writeCharBasic() {
+            buffer.writeChar('H');
+            buffer.writeChar('i');
+            assertEquals("Hi", buffer.getScreenLine(0));
+            assertEquals(2, buffer.getCursorColumn());
+        }
+
+        @Test
+        @DisplayName("writeChar pending wrap: writing at last column defers wrap")
+        void writeCharPendingWrap() {
+            TerminalBuffer small = new TerminalBuffer(5, 3, 0);
+            // Write 5 chars to fill the line
+            for (char c = 'A'; c <= 'E'; c++) {
+                small.writeChar(c);
+            }
+            // Cursor should still be at column 4 (last column), row 0
+            assertEquals(4, small.getCursorColumn());
+            assertEquals(0, small.getCursorRow());
+            assertEquals("ABCDE", small.getScreenLine(0));
+
+            // Writing one more char triggers the deferred wrap
+            small.writeChar('F');
+            assertEquals(1, small.getCursorColumn());
+            assertEquals(1, small.getCursorRow());
+            assertEquals("F", small.getScreenLine(1).trim());
+        }
+
+        @Test
+        @DisplayName("writeChar wraps and scrolls at bottom of screen")
+        void writeCharScrollsAtBottom() {
+            TerminalBuffer small = new TerminalBuffer(3, 2, 5);
+            // Fill row 0: "ABC" (pending wrap)
+            small.writeChar('A');
+            small.writeChar('B');
+            small.writeChar('C');
+            // Fill row 1: wrap here, then "DEF" (pending wrap)
+            small.writeChar('D');
+            small.writeChar('E');
+            small.writeChar('F');
+            // Next char should scroll: row0 -> scrollback, row1 becomes row0
+            small.writeChar('G');
+            assertEquals(1, small.getScrollbackSize());
+            assertEquals("ABC", small.getScrollbackLine(0));
+        }
+
+        @Test
+        @DisplayName("newLine moves cursor down")
+        void newLineBasic() {
+            buffer.setCursorPosition(5, 0);
+            buffer.newLine();
+            assertEquals(1, buffer.getCursorRow());
+            assertEquals(5, buffer.getCursorColumn()); // column unchanged
+        }
+
+        @Test
+        @DisplayName("newLine at bottom scrolls screen")
+        void newLineAtBottom() {
+            buffer.writeText("top");
+            buffer.setCursorPosition(0, buffer.getHeight() - 1);
+            buffer.newLine();
+            // Should have scrolled — top line pushed to scrollback
+            assertEquals(1, buffer.getScrollbackSize());
+        }
+
+        @Test
+        @DisplayName("carriageReturn moves to column 0")
+        void carriageReturnBasic() {
+            buffer.setCursorPosition(10, 5);
+            buffer.carriageReturn();
+            assertEquals(0, buffer.getCursorColumn());
+            assertEquals(5, buffer.getCursorRow()); // row unchanged
+        }
+
+        @Test
+        @DisplayName("backspace moves cursor left by 1")
+        void backspaceBasic() {
+            buffer.setCursorPosition(5, 0);
+            buffer.backspace();
+            assertEquals(4, buffer.getCursorColumn());
+        }
+
+        @Test
+        @DisplayName("backspace at column 0 does nothing")
+        void backspaceAtZero() {
+            buffer.setCursorPosition(0, 0);
+            buffer.backspace();
+            assertEquals(0, buffer.getCursorColumn());
+        }
+
+        @Test
+        @DisplayName("tab advances to next tab stop")
+        void tabBasic() {
+            buffer.setCursorPosition(0, 0);
+            buffer.tab();
+            assertEquals(8, buffer.getCursorColumn());
+        }
+
+        @Test
+        @DisplayName("tab from mid-position rounds up to next tab stop")
+        void tabFromMid() {
+            buffer.setCursorPosition(3, 0);
+            buffer.tab();
+            assertEquals(8, buffer.getCursorColumn());
+        }
+
+        @Test
+        @DisplayName("tab does not exceed last column")
+        void tabAtEnd() {
+            buffer.setCursorPosition(75, 0);
+            buffer.tab();
+            assertEquals(79, buffer.getCursorColumn());
+        }
+    }
+
 }
