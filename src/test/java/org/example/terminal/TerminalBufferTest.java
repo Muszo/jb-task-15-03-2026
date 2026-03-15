@@ -682,4 +682,207 @@ class TerminalBufferTest {
         }
     }
 
+
+
+    @Nested
+    @DisplayName("Delete characters")
+    class DeleteCharsTests {
+
+        @Test
+        @DisplayName("Delete characters at cursor shifts content left")
+        void deleteShiftsLeft() {
+            buffer.writeText("ABCDE");
+            buffer.setCursorPosition(1, 0);
+            buffer.deleteChars(2);
+            assertEquals("ADE", buffer.getScreenLine(0));
+        }
+
+        @Test
+        @DisplayName("Delete characters clears vacated cells with current attributes")
+        void deleteClearsWithAttributes() {
+            TerminalBuffer small = new TerminalBuffer(10, 3, 0);
+            small.writeText("ABCDEFGHIJ");
+            CellAttributes attrs = new CellAttributes(Color.RED, Color.DEFAULT, EnumSet.noneOf(Style.class));
+            small.setCurrentAttributes(attrs);
+            small.setCursorPosition(0, 0);
+            small.deleteChars(3);
+            assertEquals(attrs, small.getAttributesAt(7, 0));
+            assertEquals(attrs, small.getAttributesAt(8, 0));
+            assertEquals(attrs, small.getAttributesAt(9, 0));
+        }
+
+        @Test
+        @DisplayName("Delete more chars than remaining fills with blanks")
+        void deleteMoreThanRemaining() {
+            buffer.writeText("ABC");
+            buffer.setCursorPosition(0, 0);
+            buffer.deleteChars(100);
+            assertEquals("", buffer.getScreenLine(0));
+        }
+
+        @Test
+        @DisplayName("Delete at end of line clears remaining")
+        void deleteAtEnd() {
+            buffer.writeText("Hello");
+            buffer.setCursorPosition(3, 0);
+            buffer.deleteChars(2);
+            assertEquals("Hel", buffer.getScreenLine(0));
+        }
+    }
+
+    @Nested
+    @DisplayName("Insert blank characters")
+    class InsertBlanksTests {
+
+        @Test
+        @DisplayName("Insert blanks shifts content right")
+        void insertBlanksShiftsRight() {
+            buffer.writeText("ABCDE");
+            buffer.setCursorPosition(2, 0);
+            buffer.insertBlanks(2);
+            String line = buffer.getScreenLine(0);
+            assertEquals('A', line.charAt(0));
+            assertEquals('B', line.charAt(1));
+            assertEquals('C', line.charAt(4));
+            assertEquals('D', line.charAt(5));
+            assertEquals('E', line.charAt(6));
+        }
+
+        @Test
+        @DisplayName("Insert blanks pushes content off end")
+        void insertBlanksOverflow() {
+            TerminalBuffer small = new TerminalBuffer(5, 3, 0);
+            small.writeText("ABCDE");
+            small.setCursorPosition(1, 0);
+            small.insertBlanks(2);
+            String line = small.getScreenLine(0);
+            assertTrue(line.startsWith("A"));
+            assertEquals('B', line.charAt(3));
+            assertEquals('C', line.charAt(4));
+        }
+    }
+
+
+    @Nested
+    @DisplayName("Erase in Display")
+    class EraseInDisplayTests {
+
+        @Test
+        @DisplayName("Mode 0: erase from cursor to end of screen")
+        void eraseCursorToEnd() {
+            buffer.writeText("Row 0 text");
+            buffer.setCursorPosition(0, 1);
+            buffer.writeText("Row 1 text");
+            buffer.setCursorPosition(0, 2);
+            buffer.writeText("Row 2 text");
+            buffer.setCursorPosition(4, 1);
+            buffer.eraseInDisplay(0);
+            assertEquals("Row 0 text", buffer.getScreenLine(0));
+            assertEquals("Row", buffer.getScreenLine(1).trim());
+            assertEquals("", buffer.getScreenLine(2));
+        }
+
+        @Test
+        @DisplayName("Mode 1: erase from start of screen to cursor")
+        void eraseStartToCursor() {
+            buffer.writeText("Row 0 text");
+            buffer.setCursorPosition(0, 1);
+            buffer.writeText("Row 1 text");
+            buffer.setCursorPosition(0, 2);
+            buffer.writeText("Row 2 text");
+            buffer.setCursorPosition(5, 1);
+            buffer.eraseInDisplay(1);
+            assertEquals("", buffer.getScreenLine(0));
+            String line1 = buffer.getScreenLine(1);
+            assertTrue(line1.stripLeading().startsWith("text"));
+            assertEquals("Row 2 text", buffer.getScreenLine(2));
+        }
+
+        @Test
+        @DisplayName("Mode 2: erase entire screen but cursor stays")
+        void eraseEntireScreenCursorStays() {
+            buffer.writeText("content");
+            buffer.setCursorPosition(5, 3);
+            buffer.eraseInDisplay(2);
+            for (int row = 0; row < buffer.getHeight(); row++) {
+                assertEquals("", buffer.getScreenLine(row));
+            }
+            assertEquals(5, buffer.getCursorColumn());
+            assertEquals(3, buffer.getCursorRow());
+        }
+
+        @Test
+        @DisplayName("Mode 3: erase screen + scrollback, cursor stays")
+        void eraseScreenAndScrollbackCursorStays() {
+            buffer.writeText("data");
+            buffer.insertNewLineAtBottom();
+            assertEquals(1, buffer.getScrollbackSize());
+            buffer.setCursorPosition(5, 3);
+            buffer.eraseInDisplay(3);
+            assertEquals(0, buffer.getScrollbackSize());
+            for (int row = 0; row < buffer.getHeight(); row++) {
+                assertEquals("", buffer.getScreenLine(row));
+            }
+            assertEquals(5, buffer.getCursorColumn());
+            assertEquals(3, buffer.getCursorRow());
+        }
+
+        @Test
+        @DisplayName("Invalid erase mode throws exception")
+        void invalidEraseMode() {
+            assertThrows(IllegalArgumentException.class, () -> buffer.eraseInDisplay(4));
+        }
+
+        @Test
+        @DisplayName("Erase uses current attributes on cleared cells")
+        void eraseUsesCurrentAttributes() {
+            buffer.writeText("Hello");
+            CellAttributes attrs = new CellAttributes(Color.RED, Color.BLUE, EnumSet.noneOf(Style.class));
+            buffer.setCurrentAttributes(attrs);
+            buffer.setCursorPosition(2, 0);
+            buffer.eraseInLine(0);
+            assertEquals(attrs, buffer.getAttributesAt(3, 0));
+        }
+    }
+
+
+    @Nested
+    @DisplayName("Erase in Line")
+    class EraseInLineTests {
+
+        @Test
+        @DisplayName("Mode 0: erase from cursor to end of line")
+        void eraseCursorToEndOfLine() {
+            buffer.writeText("Hello World");
+            buffer.setCursorPosition(5, 0);
+            buffer.eraseInLine(0);
+            assertEquals("Hello", buffer.getScreenLine(0));
+        }
+
+        @Test
+        @DisplayName("Mode 1: erase from start of line to cursor")
+        void eraseStartToEndOfLine() {
+            buffer.writeText("Hello World");
+            buffer.setCursorPosition(5, 0);
+            buffer.eraseInLine(1);
+            String line = buffer.getScreenLine(0);
+            assertTrue(line.stripLeading().startsWith("World"));
+        }
+
+        @Test
+        @DisplayName("Mode 2: erase entire line")
+        void eraseEntireLine() {
+            buffer.writeText("Hello World");
+            buffer.setCursorPosition(3, 0);
+            buffer.eraseInLine(2);
+            assertEquals("", buffer.getScreenLine(0));
+        }
+
+        @Test
+        @DisplayName("Invalid erase mode throws exception")
+        void invalidEraseLineMode() {
+            assertThrows(IllegalArgumentException.class, () -> buffer.eraseInLine(3));
+        }
+    }
+
 }
